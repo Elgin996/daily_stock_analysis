@@ -4,12 +4,14 @@ Regression tests for provider-side A-share stock code conversion.
 """
 
 import unittest
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
 from data_provider.base import DataFetcherManager, normalize_stock_code
 from data_provider.baostock_fetcher import BaostockFetcher
 from data_provider.pytdx_fetcher import PytdxFetcher
+from data_provider.realtime_types import RealtimeSource
 from data_provider.tushare_fetcher import TushareFetcher
 
 
@@ -90,6 +92,32 @@ class TestPytdxAShareCodeConversion(unittest.TestCase):
         self.assertEqual(fetcher._get_market_code("SZ600519"), (0, "600519"))
         self.assertEqual(fetcher._get_market_code("SZ.600519"), (0, "600519"))
         self.assertEqual(fetcher._get_market_code("ss.600519"), (1, "600519"))
+
+    def test_realtime_quote_uses_unified_contract(self) -> None:
+        fetcher = PytdxFetcher(hosts=[])
+        api = MagicMock()
+        api.get_security_quotes.return_value = [
+            {
+                "name": "贵州茅台",
+                "price": 1500.0,
+                "last_close": 1470.0,
+                "open": 1480.0,
+                "high": 1510.0,
+                "low": 1465.0,
+                "vol": 123456,
+                "amount": 185000000.0,
+            }
+        ]
+
+        with patch.object(fetcher, "_pytdx_session") as session:
+            session.return_value.__enter__.return_value = api
+            quote = fetcher.get_realtime_quote("600519")
+
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote.source, RealtimeSource.PYTDX)
+        self.assertEqual(quote.price, 1500.0)
+        self.assertAlmostEqual(quote.change_pct, 30.0 / 1470.0 * 100)
+        self.assertTrue(quote.has_basic_data())
 
 
 class TestTushareAShareCodeConversion(unittest.TestCase):

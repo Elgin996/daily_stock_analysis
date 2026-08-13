@@ -17,8 +17,8 @@
 
 | 场景 | 已接入源 | 默认使用方式 | 失败处理 |
 | --- | --- | --- | --- |
-| A 股日线 / 技术面 | Efinance、Tencent、AkShare、Tushare、Pytdx、Baostock、YFinance | `DataFetcherManager` 按优先级尝试；配置 `TUSHARE_TOKEN` 后 Tushare 自动进入候选源 | 单源失败后尝试下一个源；连续失败会短期熔断该源 |
-| A 股实时行情 | Tencent、AkShare Sina、Efinance、AkShare EM、Tushare | `REALTIME_SOURCE_PRIORITY` 控制顺序，默认偏向 Tencent / Sina 这类轻量源 | 失败源记录 `fallback_from`，成功源继续返回 |
+| A 股日线 / 技术面 | Tencent、Pytdx、Baostock、AkShare、Efinance、Tushare、TickFlow、YFinance | `A_SHARE_DAILY_SOURCE_PRIORITY` 按能力控制顺序；默认将腾讯/Pytdx 放在东财封装前，已配置的 Tushare 仍可优先 | 单源失败后尝试下一个源；连续失败会短期熔断该源 |
+| A 股实时行情 | Tencent、Pytdx、AkShare Sina、Efinance、AkShare EM、Tushare | `REALTIME_SOURCE_PRIORITY` 控制顺序，默认 Tencent → Pytdx → Sina → 东财封装 | 失败源记录 `fallback_from`，成功源继续返回 |
 | A 股大盘复盘 | TickFlow、AkShare、Tushare、Efinance | 配置 `TICKFLOW_API_KEY` 后，主指数和市场宽度优先尝试 TickFlow | TickFlow 权限不足或失败时回退 AkShare / Tushare / Efinance 链路 |
 | 选股快照 | Tushare、Sina、Efinance、AkShare EM、EastMoney Datacenter | 有 `TUSHARE_TOKEN` 时自动把 `tushare` 放入快照优先级；否则使用免费源链路 | 选股引擎维护 source health；状态接口透出 snapshot/daily health |
 | 选股日线补特征 | `DataFetcherManager` | 选股引擎优先复用现有日线与缓存链路 | 现有链路失败后才回到引擎自身的日线源 |
@@ -39,12 +39,12 @@ flowchart TD
     D --> C[本地 stock_daily 缓存]
     C -->|命中且新鲜| COK[复用缓存]
     C -->|缺失或过期| DM{市场}
-    DM -->|A 股| CN[Tushare if token -> Efinance/Tencent -> AkShare -> Pytdx -> Baostock -> YFinance]
+    DM -->|A 股| CN[Tushare if configured -> Tencent -> Pytdx -> TickFlow -> Baostock -> AkShare -> Efinance -> YFinance]
     DM -->|港股| HK[Longbridge if configured -> AkShare/Tushare -> YFinance]
     DM -->|美股| US[Longbridge/YFinance -> Finnhub/AlphaVantage -> Stooq]
 
     R --> RP[REALTIME_SOURCE_PRIORITY]
-    RP --> RS[Tencent -> AkShare Sina -> Efinance -> AkShare EM]
+    RP --> RS[Tencent -> Pytdx -> AkShare Sina -> Efinance -> AkShare EM]
     RP --> RT[Tushare can be placed first when token/points are available]
 
     A --> AS[Snapshot: Tushare/Sina/Efinance/AkShare EM/EM Datacenter]
@@ -106,7 +106,7 @@ flowchart TD
     TS -->|yes| SP1[tushare -> sina -> efinance -> akshare_em -> em_datacenter]
     TS -->|no| SP2[sina -> efinance -> akshare_em -> em_datacenter]
     ENV --> DAILY[DSA provider context]
-    DAILY --> DFM[DataFetcherManager: Tushare/Efinance/Tencent/AkShare/Pytdx/Baostock/YFinance]
+    DAILY --> DFM[DataFetcherManager: Tushare/Tencent/Pytdx/TickFlow/Baostock/AkShare/Efinance/YFinance]
     DFM --> RESULT[候选股 + source_errors/warnings/llm_parse_errors]
 
     API --> HOT{hotspots，与 screen 并行}
@@ -126,8 +126,11 @@ flowchart TD
 适合个人试用，依赖免费源自动 fallback。优点是不需要 token；缺点是更容易遇到上游限流或临时接口变化。
 
 ```env
-REALTIME_SOURCE_PRIORITY=tencent,akshare_sina,efinance,akshare_em
+REALTIME_SOURCE_PRIORITY=tencent,pytdx,akshare_sina,efinance,akshare_em
 ENABLE_EASTMONEY_PATCH=true
+EM_MIN_INTERVAL=1.0
+EM_JITTER_MIN=0.1
+EM_JITTER_MAX=0.5
 ```
 
 ### A 股稳定模式
@@ -138,7 +141,8 @@ ENABLE_EASTMONEY_PATCH=true
 TUSHARE_TOKEN=your_tushare_token
 TICKFLOW_API_KEY=your_tickflow_key
 
-REALTIME_SOURCE_PRIORITY=tickflow,tushare,tencent,akshare_sina,efinance,akshare_em
+REALTIME_SOURCE_PRIORITY=tickflow,tushare,tencent,pytdx,akshare_sina,efinance,akshare_em
+A_SHARE_DAILY_SOURCE_PRIORITY=tushare,tencent,pytdx,tickflow,baostock,akshare,efinance,yfinance
 SNAPSHOT_SOURCE_PRIORITY=tushare,sina,efinance,akshare_em,em_datacenter
 
 # 选股运行期默认值；显式配置时会保留你的值
@@ -147,6 +151,8 @@ DAILY_FETCH_MAX_WORKERS=1
 ```
 
 注意：TickFlow 能力按套餐权限分层；权限不足或请求失败时会 fail-open 回退到现有免费源，不建议把它当成所有市场行情的唯一来源。
+
+项目自己实现的 EastMoney HTTP 调用统一经过共享限流器；默认用系统临时目录中的 SQLite 文件协调同机多进程。多容器或多主机部署必须把 `EM_RATE_LIMIT_STATE_PATH` 配置到共享存储，或使用外部统一网关。AkShare/Efinance 库内部发出的请求无法由该入口可靠接管，因此它们保留在免费链末位，并继续依赖缓存、超时和熔断保护。
 
 ### 港股 / 美股稳定模式
 

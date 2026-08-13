@@ -27,9 +27,9 @@ class TencentFetcher(BaseFetcher):
     """Fetch qfq daily K-line data from Tencent's direct quote endpoint."""
 
     name = "TencentFetcher"
-    # This direct endpoint is the last-resort A-share daily fallback. Keeping
-    # it at priority 0 made a single Efinance failure skip the richer built-in
-    # fallback chain and try Tencent before AkShare/PyTDX/Baostock/YFinance.
+    # Global priority remains low because A-share daily routing is controlled
+    # separately by A_SHARE_DAILY_SOURCE_PRIORITY. Other capabilities keep the
+    # established provider ordering.
     priority = 5
     allow_empty_daily_data = True
 

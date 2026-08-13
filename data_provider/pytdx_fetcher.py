@@ -38,6 +38,12 @@ from .base import (
     normalize_stock_code,
     _is_hk_market,
 )
+from .realtime_types import (
+    RealtimeSource,
+    UnifiedRealtimeQuote,
+    safe_float,
+    safe_int,
+)
 import os
 
 logger = logging.getLogger(__name__)
@@ -452,7 +458,7 @@ class PytdxFetcher(BaseFetcher):
         
         return None
     
-    def get_realtime_quote(self, stock_code: str) -> Optional[dict]:
+    def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         """
         获取实时行情
         
@@ -460,7 +466,7 @@ class PytdxFetcher(BaseFetcher):
             stock_code: 股票代码
             
         Returns:
-            实时行情数据字典，失败返回 None
+            统一实时行情对象，失败返回 None
         """
         if is_bse_code(stock_code):
             raise DataFetchError(
@@ -474,19 +480,32 @@ class PytdxFetcher(BaseFetcher):
                 
                 if data and len(data) > 0:
                     quote = data[0]
-                    return {
-                        'code': stock_code,
-                        'name': quote.get('name', ''),
-                        'price': quote.get('price', 0),
-                        'open': quote.get('open', 0),
-                        'high': quote.get('high', 0),
-                        'low': quote.get('low', 0),
-                        'pre_close': quote.get('last_close', 0),
-                        'volume': quote.get('vol', 0),
-                        'amount': quote.get('amount', 0),
-                        'bid_prices': [quote.get(f'bid{i}', 0) for i in range(1, 6)],
-                        'ask_prices': [quote.get(f'ask{i}', 0) for i in range(1, 6)],
-                    }
+                    price = safe_float(quote.get('price'))
+                    pre_close = safe_float(quote.get('last_close'))
+                    change_amount = (
+                        price - pre_close
+                        if price is not None and pre_close not in (None, 0)
+                        else None
+                    )
+                    change_pct = (
+                        change_amount / pre_close * 100
+                        if change_amount is not None and pre_close not in (None, 0)
+                        else None
+                    )
+                    return UnifiedRealtimeQuote(
+                        code=stock_code,
+                        name=str(quote.get('name') or ''),
+                        source=RealtimeSource.PYTDX,
+                        price=price,
+                        change_pct=change_pct,
+                        change_amount=change_amount,
+                        volume=safe_int(quote.get('vol')),
+                        amount=safe_float(quote.get('amount')),
+                        open_price=safe_float(quote.get('open')),
+                        high=safe_float(quote.get('high')),
+                        low=safe_float(quote.get('low')),
+                        pre_close=pre_close,
+                    )
         except Exception as e:
             logger.warning(f"Pytdx 获取实时行情失败 {stock_code}: {e}")
         

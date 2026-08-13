@@ -157,7 +157,7 @@ class TestTickFlowManagerRouting(unittest.TestCase):
         with patch.dict(os.environ, {"TICKFLOW_API_KEY": "tk-test"}, clear=True):
             self.assertEqual(
                 Config._resolve_realtime_source_priority(),
-                "tencent,akshare_sina,efinance,akshare_em",
+                "tencent,pytdx,akshare_sina,efinance,akshare_em",
             )
 
 

@@ -34,7 +34,7 @@
 1. 已在 v2.3.0 修复，腾讯接口现已支持量比解析
 2. 推荐配置实时行情源优先级：
    ```bash
-   REALTIME_SOURCE_PRIORITY=tencent,akshare_sina,efinance,akshare_em
+   REALTIME_SOURCE_PRIORITY=tencent,pytdx,akshare_sina,efinance,akshare_em
    ```
 3. 系统已内置 5 日均量计算作为兜底逻辑
 
