@@ -47,7 +47,7 @@ flowchart TD
     DM -->|美股| US[Longbridge/YFinance -> Finnhub/AlphaVantage -> Stooq]
 
     R --> RP[REALTIME_SOURCE_PRIORITY]
-    RP --> RS[Tencent -> AkShare Sina -> Efinance -> AkShare EM]
+    RP --> RS[Tencent -> Pytdx -> AkShare Sina -> Efinance -> AkShare EM]
     RP --> RT[Tushare can be placed first when token/points are available]
 
     A --> AS[Snapshot: Tushare/Sina/Efinance/AkShare EM/EM Datacenter]
@@ -130,8 +130,11 @@ flowchart TD
 适合个人试用，依赖免费源自动 fallback。优点是不需要 token；缺点是更容易遇到上游限流或临时接口变化。
 
 ```env
-REALTIME_SOURCE_PRIORITY=tencent,akshare_sina,efinance,akshare_em
+REALTIME_SOURCE_PRIORITY=tencent,pytdx,akshare_sina,efinance,akshare_em
 ENABLE_EASTMONEY_PATCH=true
+EM_MIN_INTERVAL=1.0
+EM_JITTER_MIN=0.1
+EM_JITTER_MAX=0.5
 ```
 
 ### A 股稳定模式
@@ -142,7 +145,8 @@ ENABLE_EASTMONEY_PATCH=true
 TUSHARE_TOKEN=your_tushare_token
 TICKFLOW_API_KEY=your_tickflow_key
 
-REALTIME_SOURCE_PRIORITY=tickflow,tushare,tencent,akshare_sina,efinance,akshare_em
+REALTIME_SOURCE_PRIORITY=tickflow,tushare,tencent,pytdx,akshare_sina,efinance,akshare_em
+A_SHARE_DAILY_SOURCE_PRIORITY=tushare,tencent,pytdx,tickflow,baostock,akshare,efinance,yfinance
 SNAPSHOT_SOURCE_PRIORITY=tushare,sina,efinance,akshare_em,em_datacenter
 
 # 选股运行期默认值；显式配置时会保留你的值
@@ -151,6 +155,8 @@ DAILY_FETCH_MAX_WORKERS=1
 ```
 
 注意：TickFlow 能力按套餐权限分层；权限不足或请求失败时会 fail-open 回退到现有免费源，不建议把它当成所有市场行情的唯一来源。
+
+项目自己实现的 EastMoney HTTP 调用统一经过共享限流器；默认用系统临时目录中的 SQLite 文件协调同机多进程。多容器或多主机部署必须把 `EM_RATE_LIMIT_STATE_PATH` 配置到共享存储，或使用外部统一网关。AkShare/Efinance 库内部发出的请求无法由该入口可靠接管，因此它们保留在免费链末位，并继续依赖缓存、超时和熔断保护。
 
 ### 港股 / 美股稳定模式
 

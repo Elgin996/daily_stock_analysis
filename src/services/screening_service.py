@@ -30,6 +30,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from src.config import Config, get_configured_llm_models, normalize_llm_channel_api_surface
+from src.services.eastmoney_client import (
+    eastmoney_get,
+    eastmoney_jitter_range_seconds,
+    eastmoney_min_interval_seconds,
+)
 from src.services.screening import REFERENCE_PROJECT, REFERENCE_REVISION, __version__ as SCREENING_VERSION
 from src.services.screening import hotspot as screening_hotspot
 from src.services.screening.config import Config as ScreeningPipelineConfig
@@ -2073,9 +2078,8 @@ class DsaEastMoneyHotspotProvider:
         self._board_changes_frame_cache: Any = None
         self._constituent_cache: Dict[Tuple[str, str], Any] = {}
         self._session = requests.Session()
-        self._request_lock = threading.RLock()
-        self._last_request_ts = 0.0
-        self._min_request_interval = 0.25
+        self._min_request_interval = eastmoney_min_interval_seconds()
+        self._request_jitter_range = eastmoney_jitter_range_seconds()
 
     @contextmanager
     def _source_call_budget(self) -> Iterator[None]:
@@ -2130,15 +2134,16 @@ class DsaEastMoneyHotspotProvider:
         time.sleep(seconds)
 
     def _eastmoney_get_once(self, url: str, **kwargs: Any) -> Any:
-        with self._request_lock:
-            elapsed = time.monotonic() - self._last_request_ts
-            if elapsed < self._min_request_interval:
-                self._sleep_within_source_budget(self._min_request_interval - elapsed)
-            kwargs["timeout"] = self._http_timeout()
-            try:
-                return self._session.get(url, **kwargs)
-            finally:
-                self._last_request_ts = time.monotonic()
+        kwargs["timeout"] = self._http_timeout()
+        return eastmoney_get(
+            url,
+            session=self._session,
+            min_interval=self._min_request_interval,
+            jitter_range=self._request_jitter_range,
+            sleep_func=self._sleep_within_source_budget,
+            max_attempts=1,
+            **kwargs,
+        )
 
     def _eastmoney_get(self, url: str, **kwargs: Any) -> Any:
         """Retry short-lived EastMoney failures without extending each socket wait."""

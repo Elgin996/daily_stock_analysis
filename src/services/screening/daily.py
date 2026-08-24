@@ -174,7 +174,7 @@ def fetch_daily_history(
 ) -> pd.DataFrame:
     """Fetch daily history for one stock code.
 
-    ``source`` accepts ``tencent``, ``sina``, ``akshare``, ``baostock``, ``tushare``,
+    ``source`` accepts ``tencent``, ``pytdx``, ``sina``, ``akshare``, ``baostock``, ``tushare``,
     ``yfinance`` or ``auto``. ``auto`` prefers Tushare when a token is
     configured, then Tencent's direct HTTP K-line endpoint before wrapper-based
     free sources. Without a token it starts with Tencent. Sina is a second
@@ -187,12 +187,12 @@ def fetch_daily_history(
     src = _normalize_daily_source(source)
     if src == "auto":
         sources: tuple[str, ...] = (
-            ("tushare", "tencent", "sina", "akshare", "baostock")
+            ("tushare", "tencent", "pytdx", "sina", "baostock", "akshare")
             if _has_tushare_token()
-            else ("tencent", "sina", "akshare", "baostock")
+            else ("tencent", "pytdx", "sina", "baostock", "akshare")
         )
         sources, source_order_notes = _rank_daily_sources_by_health(sources)
-    elif src in ("akshare", "baostock", "tushare", "tencent", "sina", "yfinance"):
+    elif src in ("akshare", "baostock", "tushare", "tencent", "pytdx", "sina", "yfinance"):
         sources = (src,)
         source_order_notes = []
     else:
@@ -238,6 +238,13 @@ def fetch_daily_history(
                 elif current == "sina":
                     result = _call_daily_wrapper(
                         _fetch_daily_sina,
+                        current,
+                        normalized_code,
+                        lookback_days=normalized_lookback_days,
+                    )
+                elif current == "pytdx":
+                    result = _call_daily_wrapper(
+                        _fetch_daily_pytdx,
                         current,
                         normalized_code,
                         lookback_days=normalized_lookback_days,
@@ -594,6 +601,22 @@ def _fetch_daily_tencent(code: str, *, lookback_days: int) -> pd.DataFrame:
     for col in ("open", "close", "high", "low", "volume", "amount"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df.tail(count).copy()
+
+
+def _fetch_daily_pytdx(code: str, *, lookback_days: int) -> pd.DataFrame:
+    """Fetch raw daily bars through the project's existing Tongdaxin client."""
+    from data_provider.pytdx_fetcher import PytdxFetcher
+
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=max(int(lookback_days) * 2, 90))
+    df = PytdxFetcher().get_daily_data(
+        str(code).zfill(6),
+        start_date=start_date.strftime("%Y-%m-%d"),
+        end_date=end_date.strftime("%Y-%m-%d"),
+    )
+    if df is None or df.empty:
+        raise RuntimeError(f"pytdx daily history empty for {code}")
+    return df.tail(max(int(lookback_days), 30)).copy()
 
 
 def _fetch_daily_sina(code: str, *, lookback_days: int) -> pd.DataFrame:

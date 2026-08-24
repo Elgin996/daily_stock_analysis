@@ -695,8 +695,6 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
     def test_hotspot_provider_retries_transient_eastmoney_failure(self) -> None:
         import requests
 
-        provider = screening_service.DsaEastMoneyHotspotProvider()
-
         class FakeResponse:
             def raise_for_status(self) -> None:
                 return None
@@ -711,13 +709,23 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
                 }
 
         get_mock = MagicMock(side_effect=[requests.exceptions.ConnectionError("Connection aborted"), FakeResponse()])
-        provider._last_request_ts = time.monotonic()
-        with (
-            patch("src.services.screening_service.time.sleep") as sleep_mock,
-            patch.object(provider._session, "get", get_mock),
-            patch("requests.get", side_effect=AssertionError("bare requests.get should not be used for EastMoney hotspots")) as bare_get,
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            os.environ,
+            {
+                "EM_RATE_LIMIT_STATE_PATH": str(Path(tmpdir) / "eastmoney.sqlite3"),
+                "EM_MIN_INTERVAL": "0.1",
+                "EM_JITTER_MIN": "0",
+                "EM_JITTER_MAX": "0",
+            },
+            clear=False,
         ):
-            frame = provider._fetch_board_names(source_fs="m:90 t:3 f:!50")
+            provider = screening_service.DsaEastMoneyHotspotProvider()
+            with (
+                patch("src.services.screening_service.time.sleep") as sleep_mock,
+                patch.object(provider._session, "get", get_mock),
+                patch("requests.get", side_effect=AssertionError("bare requests.get should not be used for EastMoney hotspots")) as bare_get,
+            ):
+                frame = provider._fetch_board_names(source_fs="m:90 t:3 f:!50")
 
         self.assertFalse(frame.empty)
         self.assertEqual(frame.iloc[0]["name"], "AI算力")
@@ -2015,19 +2023,29 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
         fetcher_manager.assert_not_called()
 
     def test_hotspot_provider_routes_remaining_budget_into_http_timeout(self) -> None:
-        provider = screening_service.DsaEastMoneyHotspotProvider()
-        response = MagicMock()
-        response.json.return_value = {
-            "data": {"diff": [{"f14": "机器人概念", "f3": 3.5}]},
-        }
-        provider._session.get = MagicMock(return_value=response)
-
-        with (
-            patch.dict(os.environ, {"SCREENING_HOTSPOT_CALL_TIMEOUT_SEC": "0.25"}, clear=False),
-            patch.object(provider, "_fetch_board_changes_with_fallback", return_value=pd.DataFrame()),
-            patch.object(provider, "_fetch_rankings_with_fallback", return_value=pd.DataFrame()),
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            os.environ,
+            {
+                "SCREENING_HOTSPOT_CALL_TIMEOUT_SEC": "0.25",
+                "EM_RATE_LIMIT_STATE_PATH": str(Path(tmpdir) / "eastmoney.sqlite3"),
+                "EM_MIN_INTERVAL": "0",
+                "EM_JITTER_MIN": "0",
+                "EM_JITTER_MAX": "0",
+            },
+            clear=False,
         ):
-            frame = provider.stock_board_concept_name_em()
+            provider = screening_service.DsaEastMoneyHotspotProvider()
+            response = MagicMock()
+            response.json.return_value = {
+                "data": {"diff": [{"f14": "机器人概念", "f3": 3.5}]},
+            }
+            provider._session.get = MagicMock(return_value=response)
+
+            with (
+                patch.object(provider, "_fetch_board_changes_with_fallback", return_value=pd.DataFrame()),
+                patch.object(provider, "_fetch_rankings_with_fallback", return_value=pd.DataFrame()),
+            ):
+                frame = provider.stock_board_concept_name_em()
 
         self.assertEqual(frame.iloc[0]["板块名称"], "机器人概念")
         timeout = provider._session.get.call_args.kwargs["timeout"]
@@ -3440,7 +3458,7 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
 
         self.assertIs(daily_module.fetch_daily_history, builtin_fetch)
 
-    def test_fetch_daily_history_wraps_tencent_and_sina_with_daily_timeout(self) -> None:
+    def test_fetch_daily_history_wraps_tencent_pytdx_and_sina_with_daily_timeout(self) -> None:
         import src.services.screening.daily as daily_module
 
         wrapped_calls: list[dict[str, object]] = []
@@ -3480,6 +3498,12 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
                 source="sina",
                 retries=0,
             )
+            pytdx_result = daily_module.fetch_daily_history(
+                "3",
+                lookback_days=40,
+                source="pytdx",
+                retries=0,
+            )
 
         self.assertEqual(
             wrapped_calls,
@@ -3496,10 +3520,17 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
                     "args": ("000002",),
                     "kwargs": {"lookback_days": 30},
                 },
+                {
+                    "fetcher": "_fetch_daily_pytdx",
+                    "source": "pytdx",
+                    "args": ("000003",),
+                    "kwargs": {"lookback_days": 40},
+                },
             ],
         )
         self.assertEqual(tencent_result.attrs["daily_source"], "tencent")
         self.assertEqual(sina_result.attrs["daily_source"], "sina")
+        self.assertEqual(pytdx_result.attrs["daily_source"], "pytdx")
 
     def test_dsa_daily_history_bridge_writes_last_good_cache_on_dsa_success(self) -> None:
         import src.services.screening.daily as daily_module

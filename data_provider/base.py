@@ -15,6 +15,7 @@
 """
 
 import logging
+import os
 import random
 import time
 from threading import BoundedSemaphore, RLock, Thread
@@ -629,6 +630,26 @@ class DataFetcherManager:
         "FinnhubFetcher": {"us"},
         "AlphaVantageFetcher": {"us"},
     }
+    _CN_DAILY_SOURCE_NAMES = {
+        "tushare": "TushareFetcher",
+        "tencent": "TencentFetcher",
+        "pytdx": "PytdxFetcher",
+        "tickflow": "TickFlowFetcher",
+        "baostock": "BaostockFetcher",
+        "akshare": "AkshareFetcher",
+        "efinance": "EfinanceFetcher",
+        "yfinance": "YfinanceFetcher",
+    }
+    _CN_DAILY_DEFAULT_PRIORITY = (
+        "tushare",
+        "tencent",
+        "pytdx",
+        "tickflow",
+        "baostock",
+        "akshare",
+        "efinance",
+        "yfinance",
+    )
     _daily_source_health = CircuitBreaker(failure_threshold=3, cooldown_seconds=300.0)
     _CN_INDEX_DAILY_SOURCE_ORDER = (
         "TencentFetcher",
@@ -809,6 +830,42 @@ class DataFetcherManager:
             )
 
         return kept
+
+    @classmethod
+    def _order_cn_daily_fetchers(cls, fetchers: List[BaseFetcher]) -> List[BaseFetcher]:
+        """Apply an A-share-specific route without changing other capabilities."""
+        raw_priority = os.getenv("A_SHARE_DAILY_SOURCE_PRIORITY", "")
+        requested_tokens = [
+            token.strip().lower()
+            for token in raw_priority.split(",")
+            if token.strip()
+        ]
+        unknown_tokens = [
+            token for token in requested_tokens if token not in cls._CN_DAILY_SOURCE_NAMES
+        ]
+        if unknown_tokens:
+            logger.warning(
+                "Ignoring unsupported A_SHARE_DAILY_SOURCE_PRIORITY entries: %s",
+                ",".join(unknown_tokens),
+            )
+        requested = list(dict.fromkeys(
+            token for token in requested_tokens if token in cls._CN_DAILY_SOURCE_NAMES
+        ))
+        if not requested:
+            requested = list(cls._CN_DAILY_DEFAULT_PRIORITY)
+        ordered_names = [
+            cls._CN_DAILY_SOURCE_NAMES[token]
+            for token in requested
+        ]
+        rank = {name: index for index, name in enumerate(ordered_names)}
+        original_rank = {id(fetcher): index for index, fetcher in enumerate(fetchers)}
+        return sorted(
+            fetchers,
+            key=lambda fetcher: (
+                rank.get(fetcher.name, len(rank)),
+                original_rank[id(fetcher)],
+            ),
+        )
 
     @classmethod
     def _daily_health_key(cls, fetcher: BaseFetcher, market: str) -> str:
@@ -1513,7 +1570,7 @@ class DataFetcherManager:
           2. PytdxFetcher (Priority 2) - 通达信
           3. BaostockFetcher (Priority 3)
           4. YfinanceFetcher (Priority 4)
-          5. TencentFetcher (Priority 5) - A 股最终兜底
+          5. TencentFetcher (Priority 5) - 全局优先级；A 股日线使用独立能力路由
         """
         from src.config import get_config
         from .efinance_fetcher import EfinanceFetcher
@@ -1666,6 +1723,8 @@ class DataFetcherManager:
         if market != "cn":
             fetchers = self._filter_daily_fetchers_for_market(fetchers, market)
         fetchers = self._filter_fetchers_by_capability(fetchers, capability="daily_data")
+        if market == "cn":
+            fetchers = self._order_cn_daily_fetchers(fetchers)
         total_fetchers = len(fetchers)
 
         if total_fetchers == 0:
@@ -2099,11 +2158,9 @@ class DataFetcherManager:
         
         故障切换策略（按配置的优先级）：
         1. 美股：使用 YfinanceFetcher.get_realtime_quote()
-        2. EfinanceFetcher.get_realtime_quote()
-        3. AkshareFetcher.get_realtime_quote(source="em")  - 东财
-        4. AkshareFetcher.get_realtime_quote(source="sina") - 新浪
-        5. AkshareFetcher.get_realtime_quote(source="tencent") - 腾讯
-        6. 返回 None（降级兜底）
+        2. A 股：默认腾讯直连 -> Pytdx TCP -> 新浪 -> 东财封装
+        3. 显式配置的 Tushare/TickFlow 按 REALTIME_SOURCE_PRIORITY 参与
+        4. 返回 None（降级兜底）
         
         Args:
             stock_code: 股票代码
@@ -2253,6 +2310,16 @@ class DataFetcherManager:
                             operation="get_realtime_quote",
                         )
                         quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code, source="tencent")
+
+                elif source == "pytdx":
+                    fetcher = self._get_fetcher_by_name("PytdxFetcher", capability="realtime_quote")
+                    if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
+                        record_provider_run_started(
+                            data_type="realtime_quote",
+                            provider=fetcher.name,
+                            operation="get_realtime_quote",
+                        )
+                        quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code)
                 
                 elif source == "tushare":
                     fetcher = self._get_fetcher_by_name("TushareFetcher", capability="realtime_quote")
