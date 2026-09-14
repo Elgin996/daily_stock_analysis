@@ -151,13 +151,14 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 |------------|------|:----:|
 | `STOCK_LIST` | Watchlist codes, e.g., `600519,300750,002594,7203.T,005930.KS`; English commas are recommended, while pasted Chinese commas, enumeration commas, semicolons, spaces, and newlines are recognized and normalized to English commas | ✅ |
 | `ANSPIRE_API_KEYS` | [Anspire AI Search](https://aisearch.anspire.cn/) optimized for Chinese content; the same key can also be used for Anspire LLM fallback scenarios (example model: `Doubao-Seed-2.0-lite`) | Recommended |
-| `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis) search-engine results for realtime financial news | Recommended |
+| `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/github-daily-stock-analysis) search-engine results for realtime financial news | Recommended |
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) Search API (for news search) | Optional |
 | `BOCHA_API_KEYS` | [Bocha Search](https://open.bocha.cn/) Web Search API (Chinese search optimized, supports AI summaries, multiple keys comma-separated) | Optional |
 | `BRAVE_API_KEYS` | [Brave Search](https://brave.com/search/api/) API (privacy-first, US-stock news enrichment, comma-separated for multiple keys) | Optional |
 | `MINIMAX_API_KEYS` | [MiniMax](https://platform.minimax.io/) Coding Plan Web Search (structured search results) | Optional |
 | `SEARXNG_BASE_URLS` | SearXNG self-hosted instances (quota-free fallback, enable format: json in settings.yml); when empty, `searx.space` discovery is used only if public instances are explicitly enabled | Optional |
 | `SEARXNG_PUBLIC_INSTANCES_ENABLED` | Auto-discover public SearXNG instances from `searx.space` when `SEARXNG_BASE_URLS` is empty (default `false`). Public instances are commonly rate-limited or do not return JSON, so enabling this can add 30-60s per run and still yield no news | Optional |
+| `SEARXNG_TIMEOUT_SECONDS` | Per-search timeout in seconds for self-hosted SearXNG instances (default `10`, minimum `1`). Increase for slow instances (e.g. NAS deployments aggregating many engines); public-instance timeout is unaffected. GitHub Actions requires explicit variable mapping | Optional |
 | `TUSHARE_TOKEN` | [Tushare Pro](https://tushare.pro/weborder/#/login?reg=834638) Token | Optional |
 | `TUSHARE_HTTP_URL` | Tushare Pro HTTP endpoint; when unset/empty defaults to the official `http://api.tushare.pro`. Set to a `http://` or `https://` URL only when routing through a corporate proxy, cross-border network, or a self-hosted mirror | Optional |
 | `TICKFLOW_API_KEY` | [TickFlow](https://tickflow.org) API key for optional A-share daily K-lines, realtime quotes, stock list/name lookup, and CN market review enhancement; permission or entitlement failures fall back to existing providers | Optional |
@@ -345,8 +346,6 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 
 | Variable | Description | Default | Required |
 |--------|------|--------|:----:|
-| `FUTU_OPEND_HOST` | OpenD host. The pinned `futu-api==10.8.6808` accepts an IPv4 address or a hostname that resolves to IPv4. Cross-host connections should use only a trusted network or local port forwarding. | `127.0.0.1` | Optional |
-| `FUTU_OPEND_PORT` | OpenD port in the range `1-65535`. | `11111` | Optional |
 | `FUTU_SECURITY_FIRM` | Futu `SecurityFirm` enum name. `NONE` performs the SDK's official auto-detection once; set an explicit broker when required. | `NONE` | Optional |
 | `FUTU_ACC_ID` | Select one eligible REAL account ID. When empty, all explicitly `ACTIVE` `NORMAL` and `MASTER` securities accounts are merged. Treat account IDs as sensitive configuration and do not commit them. | empty | Optional |
 
@@ -363,7 +362,10 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 | `TENCENT_PRIORITY` | Tencent direct priority for the generic A-share daily K-line route; lower values are tried earlier and `5` is the default last fallback. Registered indices use a separate fixed chain and ignore this variable. Does not affect realtime quotes. | `5` | Optional |
 | `TICKFLOW_KLINE_ADJUST` | TickFlow daily K-line adjustment mode: `none`, `forward`, `backward`, `forward_additive`, or `backward_additive`. | `none` | Optional |
 | `TICKFLOW_BATCH_DAILY_ENABLED` | Enable TickFlow batch daily K-line prefetch when the current plan supports it; permission failures are negative-cached and fall back to per-stock providers. | `true` | Optional |
-| `TICKFLOW_BATCH_SIZE` | Maximum symbols per TickFlow batch request for daily K-lines and realtime quotes. | `100` | Optional |
+| `TICKFLOW_BATCH_SIZE` | Maximum symbols per TickFlow batch request. | `100` | Optional |
+| `FUTU_OPEND_HOST` | Futu OpenD address; use an IPv4 address or an IPv4-resolvable hostname. Leave empty to disable Futu market data. | empty | Optional |
+| `FUTU_OPEND_PORT` | Futu OpenD TCP port, from `1` to `65535`. | `11111` | Optional |
+| `FUTU_HK_REALTIME_SOURCE_PRIORITY` | HK realtime source order: `futu`, `longbridge`, `akshare`, or `yfinance`, comma-separated. Failed sources fall back automatically. | `futu,longbridge,akshare,yfinance` | Optional |
 | `ENABLE_REALTIME_QUOTE` | Enable real-time quotes (if disabled, uses historical closing prices for analysis) | `true` | Optional |
 | `ENABLE_REALTIME_TECHNICAL_INDICATORS` | Intraday real-time technicals: Calculate MA5/MA10/MA20 and bull trends using real-time prices when enabled (Issue #234); uses yesterday's close if disabled. | `true` | Optional |
 | `ENABLE_CHIP_DISTRIBUTION` | Enable chip distribution analysis (this API is unstable, recommended to disable for cloud deployment). GitHub Actions users must set `ENABLE_CHIP_DISTRIBUTION=true` in Repository Variables to enable; disabled by default in workflows. | `true` | Optional |
@@ -418,14 +420,17 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 | `SCHEDULE_TIME` | Scheduled execution time | `18:00` |
 | `SCHEDULE_TIMES` | Multiple scheduled execution times, comma-separated; falls back to `SCHEDULE_TIME` when empty | empty |
 | `DSA_RUNTIME_SCHEDULER_TIMEOUT_SECONDS` | Hard timeout in seconds for each Web/API runtime scheduler analysis (minimum 60); the isolated analysis process is terminated on timeout so later runs can continue | `2700` |
+| `DSA_TIMEOUT_PARTIAL_NOTIFY` | **Default on (behavior change):** after a hard timeout, send a partial notification for analyses already saved to history; previously timeout sent no per-stock push. When `false`, structured `last_error` is still recorded but no push is sent | `true` |
 | `SCHEDULE_RUN_IMMEDIATELY` | Run once immediately when scheduler mode starts; when unset it keeps following the legacy `RUN_IMMEDIATELY` runtime override | `true` |
 | `RUN_IMMEDIATELY` | Run once immediately for non-scheduler startup; also acts as the legacy fallback when `SCHEDULE_RUN_IMMEDIATELY` is unset | `true` |
 | `LOG_DIR` | Log directory | `./logs` |
 | `SAVE_CONTEXT_SNAPSHOT` | Persist analysis-history `context_snapshot`. When false, new history records do not save enhanced_context, market_phase_summary, AnalysisContextPack overview, or diagnostic snapshots, but current-run prompt summaries remain enabled | `true` |
 
+> Timeout partial-delivery ops: a notification-channel exception is logged (`Partial timeout notification failed`) and skipped; it is not re-raised and cannot keep `status().running` true (notify runs on a daemon thread after the analysis lock is released). Storage import / collect failures also fail open: `status().last_error` may stay at the baseline `timed out after Ns` string, or be enriched to `completed=0`, which is indistinguishable from “nothing was saved”. Grep `Failed to collect completed analyses after timeout`, `Timeout partial delivery failed open`, and `Partial timeout notification failed`. After the first release, watch notification volume; set `DSA_TIMEOUT_PARTIAL_NOTIFY=false` to disable pushes.
+
 > Behavior notes:
 > - When `TICKFLOW_API_KEY` is configured, TickFlow is instantiated as an optional A-share daily K-line data source and CN market-review enhancer. `TICKFLOW_PRIORITY` only affects the generic A-share daily K-line/provider fallback chain. Realtime quote priority is controlled separately by `REALTIME_SOURCE_PRIORITY`; TickFlow realtime quotes are used only when that list explicitly includes `tickflow`, and any source listed before `tickflow` is tried first.
-> - The five SH/SZ indices currently registered in `IndexRegistry` are `sh000016` (SSE 50), `sh000688` (STAR 50), `sz399001` (SZSE Component), `sz399006` (ChiNext), and `sh000300` (CSI 300). Explicit-market inputs (exchange-suffix forms such as `000016.SH` are also accepted) bypass generic priority sorting and use the fixed Tencent → AkShare → TickFlow → YFinance fallback chain; unconfigured or unavailable providers are skipped. Bare `000016`-style inputs remain stocks and do not enter the index chain. This fixed chain ignores `EFINANCE_PRIORITY`, `AKSHARE_PRIORITY`, `TUSHARE_PRIORITY`, `TICKFLOW_PRIORITY`, `PYTDX_PRIORITY`, `BAOSTOCK_PRIORITY`, `YFINANCE_PRIORITY`, and `TENCENT_PRIORITY`. Existing stock and realtime-quote ordering is unchanged.
+> - All SH/SZ indices currently registered in `IndexRegistry` (the `sh`/`sz`/`csi` prefixes; see the [Index watchlist configuration](#index-watchlist-configuration) registry notes and `scripts/stock_index_seeds/index_registry.csv` for the full list) bypass generic priority sorting when given as explicit-market inputs (exchange-suffix forms such as `000016.SH` are also accepted) and use the fixed Tencent → AkShare → TickFlow → YFinance fallback chain; unconfigured or unavailable providers are skipped. Bare `000016`-style inputs remain stocks and do not enter the index chain. This fixed chain ignores `EFINANCE_PRIORITY`, `AKSHARE_PRIORITY`, `TUSHARE_PRIORITY`, `TICKFLOW_PRIORITY`, `PYTDX_PRIORITY`, `BAOSTOCK_PRIORITY`, `YFINANCE_PRIORITY`, and `TENCENT_PRIORITY`. Existing stock and realtime-quote ordering is unchanged.
 > - Registered index names normally come from the local registry. Only an invalid registry name triggers the Tencent → AkShare → TickFlow name fallback; YFinance is not part of the name chain. If all four daily providers fail, an index request returns an empty result with a summary warning, while ordinary stocks retain the existing final `DataFetchError` contract.
 > - TickFlow daily K-lines default to `TICKFLOW_KLINE_ADJUST=none`; daily `volume` is converted from lots to shares, while `amount` remains in yuan.
 > - TickFlow daily K-line range requests pass explicit `start_time` / `end_time` / `count`. Because the official quickstart documents that time-range queries are still limited by `count`, non-empty count-capped responses whose first returned trading date is later than the requested start trading date are rejected before normalization or cache writes, allowing manager fallback to continue.
@@ -439,7 +444,7 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 > Compatibility note (Issue #1815): `MARKET_REVIEW_REGION=cn|hk|us|jp|kr|both` only expands the market set used by market review; `jp`/`kr` are for recap scope and do not open JP/KR for Market Light alerts.
 > - Changes in `src/config.py`, `src/core/config_registry.py`, and `src/services/system_config_service.py` are configuration-contract updates only, and do not alter runtime provider/model/base URL routing semantics or trigger provider migration/cleanup logic.
 > - Affected config keys are `MARKET_REVIEW_REGION` and `MARKET_REVIEW_COLOR_SCHEME`; existing model/runtime keys (`LITELLM_MODEL`, `AGENT_LITELLM_MODEL`, `LITELLM_FALLBACK_MODELS`, `VISION_MODEL`, `OPENAI_BASE_URL`, etc.) remain unchanged under the existing atomic upsert semantics and are not silently cleared when this scope is changed.
-> - Verifiable evidence summary: official provider / Base URL / model-name sources remain the [LLM Config Guide](LLM_CONFIG_GUIDE_EN.md#official-references-for-provider-presets--base-urls--model-naming), and the locked runtime dependency window remains `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0` in `requirements.txt`; this scope adds no migration script or cleanup branch, and save/import still writes only submitted keys. `tests/test_system_config_service.py::SystemConfigServiceTestCase::test_update_market_review_region_does_not_trigger_runtime_model_cleanup` covers saving `MARKET_REVIEW_REGION` without clearing or rewriting existing `LITELLM_CONFIG`, `LLM_CHANNELS`, `LLM_OPENAI_*`, `LITELLM_MODEL`, `AGENT_LITELLM_MODEL`, `LITELLM_FALLBACK_MODELS`, `VISION_MODEL`, `OPENAI_*`, and related runtime settings.
+> - Verifiable evidence summary: official provider / Base URL / model-name sources remain the [LLM Config Guide](LLM_CONFIG_GUIDE_EN.md#official-references-for-provider-presets--base-urls--model-naming), and the locked runtime dependency window remains `litellm>=1.80.10,!=1.82.7,!=1.82.8,<1.99.0` in `requirements.txt`; this scope adds no migration script or cleanup branch, and save/import still writes only submitted keys. `tests/test_system_config_service.py::SystemConfigServiceTestCase::test_update_market_review_region_does_not_trigger_runtime_model_cleanup` covers saving `MARKET_REVIEW_REGION` without clearing or rewriting existing `LITELLM_CONFIG`, `LLM_CHANNELS`, `LLM_OPENAI_*`, `LITELLM_MODEL`, `AGENT_LITELLM_MODEL`, `LITELLM_FALLBACK_MODELS`, `VISION_MODEL`, `OPENAI_*`, and related runtime settings.
 > - Rollback is a restore-and-recover path: apply pre-PR `.env` / config backup for the above keys, restore `MARKET_REVIEW_REGION`, and restart the runtime; or revert this PR directly.
 > - CN market review reports now use a post-market workstation layout with market signal, index detail, sector Top tables, news catalysts, next-session plan, and risk sections. The market signal uses a plain-text score such as `66/100 (constructive, risk-on)` instead of block bars so it renders consistently across terminals and notification clients. News catalysts list only headline, source, and link instead of search snippets to reduce mixed-language noise. Missing data sources degrade by omitting or simplifying only the affected block.
 > - Per-stock analysis, realtime quote priority, and sector rankings fallback remain unchanged.
@@ -658,6 +663,81 @@ python main.py --schedule             # Scheduled task mode
 python main.py --debug                # Debug mode (verbose logging)
 python main.py --workers 5            # Specify concurrency
 ```
+
+### One-shot index analysis (Phase 1)
+
+The one-shot `--stocks` entry supports full analysis of registered SH, SZ, and CSI indices. Index targets are specified explicitly with an `sh`/`sz` prefix (e.g. `sh000016`) or a `.CSI` alias (e.g. `000300.CSI`, `930955.CSI`); a bare six-digit code (e.g. `000016`) is always treated as a stock.
+
+```bash
+# Analyze three indices in one batch: SSE 50, CSI 300, CSI Dividend Low Vol 100
+python main.py --stocks sh000016,000300.CSI,930955.CSI
+# Mix indices and stocks in one batch (000016 retains stock identity)
+python main.py --stocks sh000016,000016
+# Fetch index data only, no AI analysis
+python main.py --stocks sh000016 --dry-run
+```
+
+Index targets are handled with `market=cn` throughout the Pipeline for market phase, daily-bar target date, resume/checkpoint date, history window, and `DecisionSignal`. Stock-only modules (chip distribution, fundamentals, board membership, capital flow, LHB, corporate events) are centrally skipped. An unregistered `.CSI` input (e.g. `930956.CSI`) is rejected before any market-data provider request: the CLI `--stocks` entry and the Actions daily workflow reject the whole batch for the run (no target in the batch runs), while Web/API rejects only that target in an async batch (it enters `rejected`) or returns 4xx for a sync/single request. Search and reports use the registry Chinese index name and never carry machine codes.
+
+Indices share the A-share trading-day semantics: when the trading-day check is enabled, registered indices (`sh`/`sz` prefix or `.CSI` alias) participate in CN holiday filtering as `market=cn`, so indices are skipped on A-share holidays; a market-unknown non-index code keeps the existing fail-open behavior. `--force-run` forces execution on non-trading days.
+
+Index realtime quotes use a dedicated fixed chain: Tencent → Sina → Eastmoney single-stock endpoint → TickFlow. SH/SZ indices are requested with explicit symbols (`sh000016`/`sz399001`); CSI indices are served only by the Eastmoney single-stock endpoint (`2.{code}` secid). The explicit index identity is preserved end-to-end and never degrades into the colliding stock quote.
+
+### Web/API index entry (Phase 2 PR1)
+
+Web autocomplete and search now expose registered indices: searching a registry Chinese name (e.g. `上证50`) or an explicit code (`sh000016`, `930955.CSI`) returns the matching index row and lets you submit its analysis; popular candidates still show stocks only (`assetType=stock`), never indices.
+
+The API `/analyze` endpoint builds a structured `AnalysisTarget` for explicit index inputs: `sh000016` is enqueued as `asset_type=INDEX` with `canonical_id=sh000016`, and `930955.CSI`/`csi930955` converge to `csi930955`. Indices and same-digit stocks (e.g. `sh000016` vs `000016`) are deduplicated independently and never collapse. An unregistered CSI input (e.g. `930956.CSI`) returns an explicit 4xx for a single async or sync request, and in an async batch only that target enters the response `rejected` list while the rest of the batch is enqueued normally. Chinese-name inputs (e.g. `贵州茅台`) keep the existing stock-name resolution path and never enter index classification.
+
+Bot `/analyze` now accepts registered-index explicit codes (`sh000016`), CSI aliases (`930955.CSI`), and registered Chinese names (`上证50`). The registry canonical and structured `AnalysisTarget` flow into the same Pipeline used by CLI/API; unregistered CSI forms, unknown names, and ambiguous registered names return an explicit error without submitting a task. Existing A/HK/US codes and stock names keep the legacy-code path.
+
+### GitHub Actions index entry (Phase 2 PR3)
+
+The GitHub Actions daily workflow (`.github/workflows/00-daily-analysis.yml`) analyzes explicit index tokens from the `STOCK_LIST` config in the same batch as stocks: when `GITHUB_ACTIONS=true`, a no-arg `python main.py` run (the `full` and `stocks-only` modes; `market-only` does not analyze the stock list and is exempt from this classification) classifies `STOCK_LIST` with the same typing rules as `--stocks`, so explicit index tokens (e.g. `sh000016`, `930955.CSI`) take the index path while stock tokens keep the existing path — no second Pipeline or capability matrix is introduced; a batch containing an unregistered `.CSI` target is rejected as a whole. The local no-arg default path (`.env`/Docker `STOCK_LIST`) and scheduled hot-reload (`--schedule`/`config.schedule_enabled`) do not participate in this classification: local `--stocks` runs do classify, but the local no-arg default path and scheduled mode construct no targets from `--stocks`, so the default `STOCK_LIST` semantics in those environments are unchanged.
+
+> **Phase 2 boundary**: `--schedule`, Bot `/ask`, and Bot `/batch` still do not expose index entrypoints. Web/API, Bot `/analyze`, the one-shot `--stocks` entry, and the GitHub Actions daily workflow support indices.
+
+### Index watchlist configuration
+
+`STOCK_LIST` accepts index targets mixed in with stocks under the following rules at two entry points: the one-shot `--stocks` argument and the GitHub Actions daily workflow (`GITHUB_ACTIONS=true` no-arg `full`/`stocks-only` runs). Local `.env`/Docker no-arg default runs do not participate in index classification; `STOCK_LIST` keeps its existing stock semantics there. To analyze indices from local `.env`/Docker, pass `--stocks` explicitly (one-shot run) or use the GitHub Actions entry. Classification runs before stock parsing: an explicit form that matches a registered index takes the `market=cn` index Pipeline; anything else continues on the stock path (`.CSI` prefixed forms excepted — see the rejection rule below). The classification happens **before normalization**, so you must write an explicit code form; bare codes are never "auto-promoted".
+
+**Recognized code forms for registered indices:**
+
+| Family | Canonical (registry identity) | Display / equivalent explicit forms | Example |
+|--------|-------------------------------|--------------------------------------|---------|
+| Shanghai (SSE / CSI series listed on SH) | `sh` + 6 digits | `{code}.SH` (plus cross-family aliases such as `sz399300` → `sh000300`) | `sh000016`, `000016.SH` (SSE 50) |
+| Shenzhen (SZSE / CNI series) | `sz` + 6 digits | `{code}.SZ` | `sz399006`, `399006.SZ` (ChiNext); `sz399365`, `399365.SZ` (CNI Grain) |
+| CSI (CSI index code ranges) | `csi` + 6 digits | `{code}.CSI` | `csi930606`, `930606.CSI` (CSI Steel); `csi930955`, `930955.CSI` (CSI Dividend Low Vol 100) |
+| US indices | not in the CN registry | bare code as-is | `NDX` (Nasdaq 100), `SPX`, `DJI` |
+
+> The full list is defined by `scripts/stock_index_seeds/index_registry.csv`; the bundled `apps/dsa-web/public/stocks.index.json` is generated from it (`python scripts/generate_index_from_csv.py --index-only`). For SH/SZ families the exchange-suffix form is equivalent to the canonical; for the `csi` family the canonical is `csi930606` and the equivalent explicit form is `930606.CSI` (both converge to the same index).
+
+**Rules with correct/incorrect examples:**
+
+- **Use a registered code in its explicit form** (prefix or exchange suffix); do not write unregistered code ranges (the whole batch is rejected, or the token is treated as a stock). Matching is case-insensitive: `930955.csi`, `CSI930955`, and `930955.CSI` are equivalent; the canonical and the explicit alias/display of the same index are equivalent (`csi930606` ≡ `930606.CSI`, `sz399365` ≡ `399365.SZ`). A wrong exchange suffix (e.g. `399365.SH`) is rejected as unsupported (that suffix does not accept that base code), while a bare 6-digit code falls back to the stock path.
+- **An unregistered `.CSI` target rejects the whole batch (only at the `--stocks` and GitHub Actions entries)**: a one-shot `--stocks` or a GitHub Actions daily-workflow `STOCK_LIST` containing an unregistered `.CSI` (e.g. `930956.CSI`, or any CSI range other than the registered ones) is rejected as a whole — none of the targets run. The local `.env`/Docker no-arg default path does not classify indices, so this whole-batch rejection does not apply there. Web/API async batches reject only that target and sync/single requests return 4xx (see the Web/API index entry section below for the rejected-list semantics). A wrong exchange suffix (e.g. `399365.SH`) is likewise rejected as unsupported.
+- **Bare codes are never auto-promoted to indices**: a bare 6-digit code such as `399365` / `930606` / `000016` is always treated on the stock path (the "bare code defaults to stock" contract stays); only an ambiguity note is logged. Note: for SZ-family indices (e.g. `sz399365`) the stock canonical and the index canonical share the same `sz{code}` prefixed form, so the same-code bare stock and the index live in the same persistence key domain — mind the fold semantics in the canonical-isolation section below when mixing them in one watchlist.
+- **For US indices such as `NDX`, the bare code is already the correct form**: they use the dedicated `us_index_mapping` US-index route; do **not** add CN prefixes/suffixes (e.g. `NDX.US`, `usNDX`), which could push them onto the stock path.
+- **ETFs (e.g. 159934 gold ETF, XOP) are not in the index registry**: they keep the stock-path ETF semantics, unrelated to any index sharing the same digits; write the bare code directly — an index prefix is neither needed nor supported.
+
+**Example `STOCK_LIST` (comma-separated):**
+
+```text
+600519,sh000016,930606.CSI,sz399365,159934,NDX
+```
+
+This mixes a stock (600519 Kweichow Moutai), an SSE index (sh000016), a CSI index (930606.CSI), an SZ index (sz399365), an A-share ETF (159934 — stock path) and a US index (NDX — US-index route). Because a batch containing an unregistered `.CSI` does not run at all, **check each index against the registry before configuring it**.
+
+### Index vs stock Dashboard canonical isolation (PR #2312)
+
+Registered indices are persisted under their lowercase canonical identity (`sh000016` / `sz399001` / `csi930955`). History filtering, delete-by-code, counts, and the stock bar now all use the parser for asset typing, so index records and the same-code bare stock (e.g. `000016`) are strictly isolated and never collapse. Exception: for SZ-family indices (e.g. `sz399365`) the bare-stock canonical and the index canonical share the same `sz{code}` prefixed form (a bare `399365` parsed as a stock already canonicalizes to `sz399365`), so they naturally share one key; same-code bare stocks and indices in that family are outside the isolation scope and fold together when mixed in a watchlist:
+
+- **History candidates**: index queries (`sh000016`, `SH000016`, `000016.SH`, `sz399001`, `csi930955`, `930955.CSI` and other explicit forms) reach records persisted under the lowercase canonical, the legacy uppercase canonical, or an explicit alias — but **never** the bare same-code stock record; a bare query (`000016` / `930955`) likewise never reaches index records. Stock aliases, HK, and offshore markets keep their existing equivalence semantics.
+- **Delete and count**: `DELETE /api/v1/history/by-code/{code}` and history totals converge every explicit index form; a code with no records still returns `deleted=0` (no breaking 404).
+- **Stock bar**: legacy index records (`sh000016` / `SH000016` / `000016.SH`) merge into one `/history/stocks` row whose count covers all explicit forms, and that row sits beside the bare `000016` stock row without merging. Stock-bar typing derives from the persisted `record.code`, never from the display code.
+- **API `stock_code` output is canonical**: history list, history detail, and stock-bar always surface the parser canonical for registered indices — including legacy uppercase / explicit-alias persisted records such as `SZ399300` or `000300.CSI` (both output `sh000300`) — so the frontend never has to derive a canonical from aliases.
+- **Task / SSE / API metadata**: task lists and SSE events expose an optional `asset_type` (`stock`/`index`) derived from the submitted `analysis_target` (never re-guessed); history list items and stock-bar items gain the same optional field. Clients that do not know the field simply ignore it — the field is optional and additive.
+- **Web Dashboard identity keys**: `assetType` on tasks/reports/history wins first, and backend-guaranteed canonical codes are only **case-folded** (`SH000016` -> `sh000016`) — prefix/suffix regex canonical guessing is forbidden (it would fabricate `csi000300` from `000300.CSI` or treat `sz399300` as an independent canonical, violating the registry as the single asset-type authority). Only raw watchlist strings without a type use an exact canonical/display/alias hit on the loaded `assetType=index` rows of `stocks.index.json` (never normalize-then-match, never prefix-regex guessing; batch analysis stays disabled while the registry loads, and a load failure or request exceeding 10 seconds falls back to existing stock semantics). Row selection, active-task matching, and completed-task auto-selection bucket by asset type, so an index row and a same-code stock row keep independent states and completion auto-selects the correct canonical index report.
 
 ### Use real Futu holdings as the analysis list
 
@@ -1504,7 +1584,7 @@ For this feature, the product behavior is:
 
 > Compatibility audit evidence:
 > - Official references: LiteLLM OpenAI-compatible provider documentation <https://docs.litellm.ai/docs/providers/openai_compatible>, OpenAI Chat API <https://platform.openai.com/docs/api-reference/chat/create>, and DeepSeek API docs <https://api-docs.deepseek.com/>.
-> - Dependency boundary: this repo currently pins `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0` (see `requirements.txt`); the compatibility regressions for this path were verified under that dependency window.
+> - Dependency boundary: this repo currently pins `litellm>=1.80.10,!=1.82.7,!=1.82.8,<1.99.0` (see `requirements.txt`); the compatibility regressions for this path were verified under that dependency window.
 > - Verifiable tests:
 >   - `tests/test_llm_channel_config.py` (configuration priority and provider/base URL mapping)
 >   - `tests/test_market_review_runtime.py` (`build_market_review_runtime` shared assembly path)

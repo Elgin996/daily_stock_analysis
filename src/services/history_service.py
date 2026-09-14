@@ -19,6 +19,7 @@ from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 from src.config import get_config, resolve_news_window_days
 from src.formatters import markdown_to_plain_text
 from src.data.stock_index_loader import resolve_index_stock_code
+from src.services.stock_code_utils import resolve_daily_stock_identity
 from src.report_language import (
     get_bias_status_emoji,
     get_localized_stock_name,
@@ -104,7 +105,11 @@ class HistoryService:
         return value.astimezone().isoformat()
 
     @staticmethod
-    def _history_code_filter_candidates(stock_code: str) -> List[str]:
+    def _history_code_filter_candidates(
+        stock_code: str,
+        *,
+        market_hint: Optional[str] = None,
+    ) -> List[str]:
         raw_code = str(stock_code or "").strip()
         if not raw_code:
             return []
@@ -116,12 +121,73 @@ class HistoryService:
             if candidate and candidate not in candidates:
                 candidates.append(candidate)
 
+        trusted_market = str(market_hint or "").strip().lower()
+        if trusted_market:
+            identity = resolve_daily_stock_identity(raw_code, market_hint=trusted_market)
+            if identity is None or identity.market != trusted_market:
+                return []
+            for candidate in identity.code_candidates:
+                candidate_text = str(candidate or "").strip()
+                if candidate_text.isdigit():
+                    unhinted_identity = resolve_daily_stock_identity(candidate_text)
+                    if unhinted_identity is None or unhinted_identity.market != trusted_market:
+                        continue
+                add(candidate)
+            return candidates
+
         try:
             from data_provider.base import (
                 canonical_stock_code,
                 is_bse_code,
                 normalize_stock_code,
             )
+            from src.services.stock_list_parser import ParseStatus, parse_analysis_target
+
+            # PR #2312: parser-aware index branch. ``parse_analysis_target``
+            # (with the index registry) is the single asset-type authority. When
+            # the query token is a registered INDEX, the persisted-read candidate
+            # set must be exactly:
+            #   1. the lowercase parser canonical (``sh000016`` / ``csi930955`` —
+            #      the current storage form),
+            #   2. the legacy uppercase canonical (``SH000016`` / ``CSI930955`` —
+            #      how pre-fix records were saved), and
+            #   3. every explicit alias/display form (``000016.SH`` /
+            #      ``930955.CSI`` — ``IndexEntry.aliases``).
+            # The bare same-code stock (``000016`` / ``930955``) is deliberately
+            # excluded so an index record is never reachable through a stock
+            # query and vice versa. This unifies the previous CSI-only convergence
+            # (PR #2267) with the SH/SZ index identity so all three namespaces
+            # share one branch.
+            target = parse_analysis_target(raw_code)
+            if target.asset_type == ParseStatus.INDEX:
+                index_keys = [target.canonical_id]
+                legacy_upper = (
+                    canonical_stock_code(target.canonical_id)
+                    or target.canonical_id.upper()
+                )
+                if legacy_upper and legacy_upper not in index_keys:
+                    index_keys.append(legacy_upper)
+                entry = target.matched_index
+                if entry is not None:
+                    for alias in entry.aliases:
+                        alias = str(alias or "").strip()
+                        if not alias:
+                            continue
+                        if alias not in index_keys:
+                            index_keys.append(alias)
+                        # sqlite ``IN`` comparison is case-sensitive: a legacy
+                        # record may have been persisted under the uppercase
+                        # alias form (``SZ399300`` for registry alias
+                        # ``sz399300``), so the persisted-read candidate set must
+                        # carry both the raw alias and its uppercase form. The
+                        # bare same-code stock (``000300``) is still never added.
+                        alias_upper = alias.upper()
+                        if alias_upper and alias_upper not in index_keys:
+                            index_keys.append(alias_upper)
+                for key in index_keys:
+                    if key and key not in candidates:
+                        candidates.append(key)
+                return candidates
 
             raw_canonical = canonical_stock_code(raw_code)
             normalized = canonical_stock_code(normalize_stock_code(raw_canonical))
@@ -186,7 +252,9 @@ class HistoryService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         page: int = 1,
-        limit: int = 20
+        limit: int = 20,
+        include_ambiguous_numeric_aliases: bool = True,
+        market_hint: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get history analysis list.
@@ -198,13 +266,24 @@ class HistoryService:
             end_date: End date (YYYY-MM-DD)
             page: Page number
             limit: Items per page
+            include_ambiguous_numeric_aliases: Whether to include bare numeric
+                aliases that may collide across offshore markets.
+            market_hint: Trusted market identity for candidate expansion. When
+                present, candidates from other indexed markets are excluded.
             
         Returns:
             Dictionary containing total count and items
         """
         try:
             if stock_code:
-                stock_code = self._history_code_filter_candidates(stock_code)
+                stock_code = self._history_code_filter_candidates(
+                    stock_code,
+                    market_hint=market_hint,
+                )
+                if not include_ambiguous_numeric_aliases and not market_hint:
+                    stock_code = [candidate for candidate in stock_code if not candidate.isdigit()]
+                if not stock_code:
+                    return {"total": 0, "items": []}
 
             # Parse date parameters
             start_dt = None
@@ -308,6 +387,21 @@ class HistoryService:
         code = str(raw_code or "").strip()
         if not code:
             return code
+        from src.services.stock_list_parser import ParseStatus, parse_analysis_target
+
+        try:
+            target = parse_analysis_target(code)
+        except Exception:
+            return resolve_index_stock_code(code) or code
+        if target.asset_type == ParseStatus.INDEX:
+            # PR #2312: registered index records always surface the parser
+            # canonical (lowercase ``sh000300`` / ``csi930955``), even when the
+            # persisted row was saved under a legacy uppercase canonical or an
+            # explicit alias (``SH000016`` / ``000016.SH`` / ``sz399300`` /
+            # ``000300.CSI``). Web identity keys therefore only need a simple
+            # case fold for API/task/report codes — they must never guess a
+            # canonical from prefixes/suffixes.
+            return target.canonical_id
         return resolve_index_stock_code(code) or code
 
     def _display_market_phase_summary(self, stock_code: str, context_snapshot: Any) -> Any:
@@ -368,8 +462,22 @@ class HistoryService:
             "model_used": normalize_model_used(model_used),
             "created_at": self._serialize_created_at(record.created_at),
             "market_phase_summary": market_phase_summary,
+            "asset_type": self._asset_type_for_record(record),
             **market_fields,
         }
+
+    @staticmethod
+    def _asset_type_for_record(record) -> Optional[str]:
+        """Return the parser-derived optional ``asset_type`` for a history row.
+
+        Uses the *persisted* ``record.code`` (never the display code) via
+        :func:`asset_type_from_canonical_code`, so ``sh000016`` is ``index``,
+        bare ``000016`` is ``stock`` and market review rows (``MARKET``) omit
+        the field. Optional by contract: legacy clients simply ignore it.
+        """
+        from src.services.analysis_service import asset_type_from_canonical_code
+
+        return asset_type_from_canonical_code(getattr(record, "code", None))
 
     def _resolve_record(
         self,
@@ -539,6 +647,18 @@ class HistoryService:
         except Exception as e:
             logger.error(f"根据 ID 查询历史详情失败: {e}", exc_info=True)
             return None
+
+    def get_latest_fundamental_snapshot(
+        self,
+        *,
+        query_id: str,
+        stock_code: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Read the same persisted fundamental fallback used by history detail APIs."""
+        return self.db.get_latest_fundamental_snapshot(
+            query_id=query_id,
+            code=stock_code,
+        )
 
     @staticmethod
     def _normalize_display_sniper_value(value: Any) -> Optional[str]:

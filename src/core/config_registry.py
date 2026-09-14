@@ -79,6 +79,7 @@ WEB_SETTINGS_HIDDEN_FROM_UI = {
     "USE_PROXY",
     "PROXY_HOST",
     "PROXY_PORT",
+    "SEARXNG_TIMEOUT_SECONDS",
 }
 
 _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -847,6 +848,75 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {"min": 1, "max": 500},
         "display_order": 19,
+    },
+    "FUTU_OPEND_HOST": {
+        "title": "Futu OpenD Host",
+        "description": "IPv4 address or IPv4-resolvable hostname of the Futu OpenD service. Leave empty to disable Futu.",
+        "category": "data_source",
+        "data_type": "string",
+        "ui_control": "text",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": None,
+        "options": [],
+        "validation": {},
+        "display_order": 20,
+        "help_key": "settings.data_source.FUTU_OPEND_HOST",
+        "examples": ["FUTU_OPEND_HOST=127.0.0.1"],
+        "docs": [
+            {
+                "label": "数据源配置指南",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#数据源配置",
+            },
+        ],
+        "warning_codes": [],
+    },
+    "FUTU_OPEND_PORT": {
+        "title": "Futu OpenD Port",
+        "description": "TCP port of the Futu OpenD service.",
+        "category": "data_source",
+        "data_type": "integer",
+        "ui_control": "number",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "11111",
+        "options": [],
+        "validation": {"min": 1, "max": 65535},
+        "display_order": 21,
+        "help_key": "settings.data_source.FUTU_OPEND_PORT",
+        "examples": ["FUTU_OPEND_PORT=11111"],
+        "docs": [
+            {
+                "label": "数据源配置指南",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#数据源配置",
+            },
+        ],
+        "warning_codes": [],
+    },
+    "FUTU_HK_REALTIME_SOURCE_PRIORITY": {
+        "title": "Futu 港股实时数据源优先级",
+        "description": "港股实时行情优先级，可选 futu、longbridge、akshare、yfinance。未配置 OpenD 时自动跳过 futu。",
+        "category": "data_source",
+        "data_type": "string",
+        "ui_control": "text",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "futu,longbridge,akshare,yfinance",
+        "options": [],
+        "validation": {},
+        "display_order": 22,
+        "help_key": "settings.data_source.FUTU_HK_REALTIME_SOURCE_PRIORITY",
+        "examples": ["FUTU_HK_REALTIME_SOURCE_PRIORITY=futu,longbridge,akshare,yfinance"],
+        "docs": [
+            {
+                "label": "数据源配置指南",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#数据源配置",
+            },
+        ],
+        "warning_codes": ["provider_priority_order"],
     },
     "STOCK_INDEX_REMOTE_UPDATE_ENABLED": {
         "title": "Remote Stock Index Updates",
@@ -3040,6 +3110,35 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "help_key": "settings.system.schedule",
         "examples": [
             "DSA_RUNTIME_SCHEDULER_TIMEOUT_SECONDS=2700",
+        ],
+        "docs": [
+            {
+                "label": "Full guide: configuration",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#其他配置",
+            },
+        ],
+        "warning_codes": [],
+    },
+    "DSA_TIMEOUT_PARTIAL_NOTIFY": {
+        "title": "Timeout Partial Notification",
+        "description": (
+            "After a Web/API runtime scheduler hard timeout, send a partial "
+            "notification for analyses already saved to history."
+        ),
+        "category": "system",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "true",
+        "options": [],
+        "validation": {},
+        "display_order": 13,
+        "help_key": "settings.system.schedule",
+        "examples": [
+            "DSA_TIMEOUT_PARTIAL_NOTIFY=true",
+            "DSA_TIMEOUT_PARTIAL_NOTIFY=false",
         ],
         "docs": [
             {

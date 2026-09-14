@@ -14,6 +14,7 @@ from typing import Optional, List, Any, Dict, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.v1.schemas.market_phase import MarketPhaseSummary
+from api.v1.schemas.research_artifact import ResearchArtifact
 from src.schemas.decision_action import DecisionAction
 
 
@@ -51,7 +52,11 @@ class HistoryItem(BaseModel):
         description="本次分析市场阶段低敏摘要",
     )
     created_at: Optional[str] = Field(None, description="创建时间")
-    
+    asset_type: Optional[Literal["stock", "index"]] = Field(
+        None,
+        description="后端权威资产类型（stock/index）；由持久化代码经 parser 生成。旧客户端与 market review 可缺省。",
+    )
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "id": 1234,
@@ -68,12 +73,12 @@ class HistoryItem(BaseModel):
 
 class HistoryListResponse(BaseModel):
     """历史记录列表响应"""
-    
+
     total: int = Field(..., description="总记录数")
     page: int = Field(..., description="当前页码")
     limit: int = Field(..., description="每页数量")
     items: List[HistoryItem] = Field(default_factory=list, description="记录列表")
-    
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "total": 100,
@@ -148,11 +153,15 @@ class ReportMeta(BaseModel):
         None,
         description="本次分析市场阶段低敏摘要",
     )
+    asset_type: Optional[Literal["stock", "index"]] = Field(
+        None,
+        description="后端权威资产类型（stock/index）；指数报告用于隐藏 stock-only 自选操作。market review 与旧客户端可缺省。",
+    )
 
 
 class ReportSummary(BaseModel):
     """报告概览区"""
-    
+
     analysis_summary: Optional[str] = Field(None, description="关键结论")
     operation_advice: Optional[str] = Field(None, description="操作建议")
     action: Optional[DecisionAction] = Field(None, description="结构化建议动作 taxonomy")
@@ -167,7 +176,7 @@ class ReportSummary(BaseModel):
 
 class ReportStrategy(BaseModel):
     """策略点位区"""
-    
+
     ideal_buy: Optional[str] = Field(None, description="理想买入价")
     secondary_buy: Optional[str] = Field(None, description="第二买入价")
     stop_loss: Optional[str] = Field(None, description="止损价")
@@ -252,7 +261,7 @@ class AnalysisContextPackOverview(BaseModel):
 
 class ReportDetails(BaseModel):
     """报告详情区"""
-    
+
     news_content: Optional[str] = Field(None, description="新闻摘要")
     empty_news_disclosure: Optional[str] = Field(
         None,
@@ -301,6 +310,10 @@ class AnalysisReport(BaseModel):
     summary: ReportSummary = Field(..., description="概览区")
     strategy: Optional[ReportStrategy] = Field(None, description="策略点位区")
     details: Optional[ReportDetails] = Field(None, description="详情区")
+    structured_report: Optional[ResearchArtifact] = Field(
+        None,
+        description="结构化研究产物，供看板、个股研究页、监控和 Copilot 复用",
+    )
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -365,6 +378,10 @@ class StockBarItem(BaseModel):
     market_phase_summary: Optional[MarketPhaseSummary] = Field(
         None,
         description="最新分析市场阶段低敏摘要",
+    )
+    asset_type: Optional[Literal["stock", "index"]] = Field(
+        None,
+        description="后端权威资产类型（stock/index）；由持久化代码经 parser 生成。旧客户端可缺省。",
     )
     model_config = ConfigDict(json_schema_extra={
         "example": {

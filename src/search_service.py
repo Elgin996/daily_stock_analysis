@@ -450,7 +450,7 @@ class TavilySearchProvider(BaseSearchProvider):
             # 执行搜索（优化：使用advanced深度、限制最近几天）
             search_kwargs: Dict[str, Any] = {
                 "query": query,
-                "search_depth": "advanced",  # advanced 获取更多结果
+                "search_depth": "basic",  # 为控制credit使用，将advanced修改成basic
                 "max_results": max_results,
                 "include_answer": False,
                 "include_raw_content": False,
@@ -567,7 +567,7 @@ class SerpAPISearchProvider(BaseSearchProvider):
     - 免费版每月 100 次请求
     - 返回真实的搜索结果
     
-    文档：https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis
+    文档：https://serpapi.com/github-daily-stock-analysis
     """
 
     _ORGANIC_CONTENT_FETCH_LIMIT = 1
@@ -1843,10 +1843,20 @@ class SearXNGSearchProvider(BaseSearchProvider):
     _public_instances_stale_retry_after: float = 0.0
     _public_instances_lock = threading.Lock()
 
-    def __init__(self, base_urls: Optional[List[str]] = None, *, use_public_instances: bool = False):
+    def __init__(
+        self,
+        base_urls: Optional[List[str]] = None,
+        *,
+        use_public_instances: bool = False,
+        self_hosted_timeout_seconds: Optional[int] = None,
+    ):
         normalized_base_urls = [url.rstrip("/") for url in (base_urls or []) if url.strip()]
         super().__init__(normalized_base_urls, "SearXNG")
         self._base_urls = normalized_base_urls
+        if self_hosted_timeout_seconds and int(self_hosted_timeout_seconds) > 0:
+            self._self_hosted_timeout_seconds = int(self_hosted_timeout_seconds)
+        else:
+            self._self_hosted_timeout_seconds = self.SELF_HOSTED_TIMEOUT_SECONDS
         self._use_public_instances = bool(use_public_instances and not self._base_urls)
         self._cursor = 0
         self._cursor_lock = threading.Lock()
@@ -2157,7 +2167,7 @@ class SearXNGSearchProvider(BaseSearchProvider):
                 max_attempts=len(self._base_urls),
             )
             retry_enabled = True
-            timeout = self.SELF_HOSTED_TIMEOUT_SECONDS
+            timeout = self._self_hosted_timeout_seconds
             empty_error = "SearXNG 未配置可用实例"
         elif self._use_public_instances:
             public_instances = self._get_public_instances()
@@ -2390,6 +2400,7 @@ class SearchService:
         minimax_keys: Optional[List[str]] = None,
         searxng_base_urls: Optional[List[str]] = None,
         searxng_public_instances_enabled: bool = False,
+        searxng_timeout_seconds: Optional[int] = None,
         news_max_age_days: int = 3,
         news_strategy_profile: str = "short",
     ):
@@ -2417,6 +2428,7 @@ class SearchService:
             "minimax_keys": list(minimax_keys or []),
             "searxng_base_urls": list(searxng_base_urls or []),
             "searxng_public_instances_enabled": bool(searxng_public_instances_enabled),
+            "searxng_timeout_seconds": searxng_timeout_seconds,
             "news_max_age_days": int(news_max_age_days),
             "news_strategy_profile": news_strategy_profile,
         }
@@ -2468,6 +2480,7 @@ class SearchService:
         searxng_provider = SearXNGSearchProvider(
             searxng_base_urls,
             use_public_instances=bool(searxng_public_instances_enabled and not searxng_base_urls),
+            self_hosted_timeout_seconds=searxng_timeout_seconds,
         )
         if searxng_provider.is_available:
             self._providers.append(searxng_provider)
@@ -4038,7 +4051,13 @@ class SearchService:
             # 如果提供了关键词，直接使用关键词作为查询
             query = " ".join(focus_keywords)
         elif prefer_chinese:
-            query = f"{stock_name} {stock_code} 股票 最新消息"
+            # 指数 target 的 stock_code 可能为空（Agent 工具 _resolve_search_subject
+            # 有意只传显示名），空 code 直接省略，避免拼出 "上证50  股票" 双空格。
+            query = (
+                f"{stock_name} {stock_code} 股票 最新消息"
+                if stock_code
+                else f"{stock_name} 股票 最新消息"
+            )
         elif is_foreign:
             # 港股/美股使用英文搜索关键词；优先使用英文公司名（issue #2026）
             if english_aliases and short_name and short_name != effective_name:
@@ -4051,13 +4070,13 @@ class SearchService:
             # 默认主查询：股票名称 + 核心关键词
             query = f"{stock_name} {stock_code} 股票 最新消息"
 
+        subject_label = f"{stock_name}({stock_code})" if stock_code else stock_name
         logger.info(
             (
-                "搜索股票新闻: %s(%s), query='%s', 时间范围: 近%s天 "
+                "搜索股票新闻: %s, query='%s', 时间范围: 近%s天 "
                 "(profile=%s, NEWS_MAX_AGE_DAYS=%s, prefer_chinese=%s), 目标条数=%s, provider请求条数=%s"
             ),
-            stock_name,
-            stock_code,
+            subject_label,
             query,
             search_days,
             self.news_strategy_profile,
@@ -4890,6 +4909,7 @@ def get_search_service() -> SearchService:
                     minimax_keys=config.minimax_api_keys,
                     searxng_base_urls=config.searxng_base_urls,
                     searxng_public_instances_enabled=config.searxng_public_instances_enabled,
+                    searxng_timeout_seconds=getattr(config, "searxng_timeout_seconds", None),
                     news_max_age_days=config.news_max_age_days,
                     news_strategy_profile=getattr(config, "news_strategy_profile", "short"),
                 )
